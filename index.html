@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VoteScramble - Anonymous Free-Form Voting</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Canvas Confetti -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
+  <!-- QRCode.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0fdf4',
+              100: '#dcfce7',
+              500: '#22c55e',
+              600: '#16a34a',
+              700: '#15803d',
+            },
+            accent: {
+              500: '#6366f1',
+              600: '#4f46e5',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  
+  <style>
+    @keyframes pulse-slow {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.03); opacity: 0.85; }
+    }
+    .pulse-animation {
+      animation: pulse-slow 2.5s infinite ease-in-out;
+    }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col font-sans antialiased selection:bg-indigo-500 selection:text-white">
+
+  <!-- Top Navbar -->
+  <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-40">
+    <div class="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
+      <div class="flex items-center gap-3 cursor-pointer" onclick="navigateHome()">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500 to-emerald-400 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+          <i data-lucide="shuffle" class="w-5 h-5 text-white"></i>
+        </div>
+        <div>
+          <span class="font-bold text-lg tracking-tight bg-gradient-to-r from-white via-slate-200 to-indigo-300 bg-clip-text text-transparent">VoteScramble</span>
+          <span class="hidden sm:inline-block ml-2 text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Live</span>
+        </div>
+      </div>
+
+      <div id="nav-room-badge" class="hidden flex items-center gap-2">
+        <span class="text-xs uppercase tracking-wider text-slate-400 font-medium">Room</span>
+        <span id="nav-room-code" class="font-mono font-bold text-sm bg-slate-800 px-2.5 py-1 rounded-lg border border-slate-700 text-indigo-400"></span>
+        <button onclick="copyInviteLink()" class="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition" title="Copy Invite Link">
+          <i data-lucide="link" class="w-4 h-4"></i>
+        </button>
+        <button onclick="toggleQRModal(true)" class="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition" title="Show QR Code">
+          <i data-lucide="qr-code" class="w-4 h-4"></i>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content Container -->
+  <main class="flex-1 max-w-4xl w-full mx-auto px-4 py-8 flex flex-col justify-center">
+
+    <!-- VIEW 1: LOBBY / LANDING -->
+    <section id="view-lobby" class="space-y-8">
+      <div class="text-center space-y-3">
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-medium">
+          <i data-lucide="sparkles" class="w-3.5 h-3.5"></i> Anonymous Free-Form Room Voting
+        </div>
+        <h1 class="text-4xl sm:text-5xl font-extrabold tracking-tight text-white">
+          Write Freely. <span class="bg-gradient-to-r from-indigo-400 to-emerald-400 bg-clip-text text-transparent">Scramble Fairly.</span>
+        </h1>
+        <p class="text-slate-400 max-w-lg mx-auto text-sm sm:text-base">
+          Create a room, share the link with participants, each person submits their thoughts, and the host shuffles them so everyone receives someone else's vote.
+        </p>
+      </div>
+
+      <div class="grid md:grid-cols-2 gap-6 max-w-2xl mx-auto pt-4">
+        <!-- Host Box -->
+        <div class="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-6 flex flex-col justify-between hover:border-indigo-500/50 transition shadow-xl">
+          <div class="space-y-3">
+            <div class="w-10 h-10 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center">
+              <i data-lucide="crown" class="w-5 h-5"></i>
+            </div>
+            <h2 class="text-xl font-bold text-white">Create a Room</h2>
+            <p class="text-slate-400 text-xs sm:text-sm">
+              Be the host, manage submissions, and trigger the vote scramble when everyone is ready.
+            </p>
+          </div>
+          <div class="mt-6 space-y-3">
+            <input id="host-name-input" type="text" placeholder="Your name (e.g. Host Alex)" 
+              class="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none text-sm transition">
+            <button onclick="handleCreateRoom()" id="btn-create-room"
+              class="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-medium rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30 transition">
+              <i data-lucide="plus-circle" class="w-4 h-4"></i> Start New Session
+            </button>
+          </div>
+        </div>
+
+        <!-- Join Box -->
+        <div class="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-6 flex flex-col justify-between hover:border-emerald-500/50 transition shadow-xl">
+          <div class="space-y-3">
+            <div class="w-10 h-10 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center">
+              <i data-lucide="log-in" class="w-5 h-5"></i>
+            </div>
+            <h2 class="text-xl font-bold text-white">Join a Room</h2>
+            <p class="text-slate-400 text-xs sm:text-sm">
+              Have a code or invite link? Enter below to join your group's live session.
+            </p>
+          </div>
+          <div class="mt-6 space-y-3">
+            <div class="grid grid-cols-2 gap-2">
+              <input id="join-room-code-input" type="text" placeholder="ROOM CODE" uppercase
+                class="uppercase font-mono px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none text-sm transition">
+              <input id="join-name-input" type="text" placeholder="Your Nickname" 
+                class="px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none text-sm transition">
+            </div>
+            <button onclick="handleJoinRoom()" id="btn-join-room"
+              class="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-medium rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 transition">
+              <i data-lucide="arrow-right" class="w-4 h-4"></i> Enter Room
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 2: ACTIVE ROOM (WRITING & WAITING) -->
+    <section id="view-room" class="hidden space-y-6">
+
+      <!-- Host Banner (shown only to host) -->
+      <div id="host-banner" class="hidden bg-gradient-to-r from-indigo-950/60 to-slate-900 border border-indigo-500/30 rounded-2xl p-4 sm:p-5 shadow-lg">
+        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div class="space-y-1">
+            <div class="flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded text-xs font-semibold bg-indigo-500 text-white flex items-center gap-1">
+                <i data-lucide="crown" class="w-3 h-3"></i> Room Creator
+              </span>
+              <span id="host-vote-stats" class="text-xs text-slate-300">0 of 0 submitted</span>
+            </div>
+            <p class="text-sm text-slate-400">
+              When everyone has submitted their vote, press scramble to redistribute them.
+            </p>
+          </div>
+          
+          <button id="btn-scramble" onclick="handleScramble()"
+            class="w-full sm:w-auto px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-emerald-600 hover:from-indigo-500 hover:to-emerald-500 active:scale-95 text-white font-semibold rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/20 transition disabled:opacity-50 disabled:cursor-not-allowed">
+            <i data-lucide="shuffle" class="w-4 h-4"></i> Scramble & Distribute
+          </button>
+        </div>
+      </div>
+
+      <!-- Quick Room Share Bar -->
+      <div class="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-lg bg-slate-700/70 flex items-center justify-center text-slate-300">
+            <i data-lucide="users" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <div class="text-xs text-slate-400">Room Code</div>
+            <div id="display-room-code" class="text-lg font-mono font-bold tracking-wider text-white"></div>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <button onclick="copyInviteLink()" class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-xs font-medium rounded-lg flex items-center gap-1.5 transition">
+            <i data-lucide="copy" class="w-3.5 h-3.5"></i> Copy Link
+          </button>
+          <button onclick="toggleQRModal(true)" class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-xs font-medium rounded-lg flex items-center gap-1.5 transition">
+            <i data-lucide="qr-code" class="w-3.5 h-3.5"></i> Show QR
+          </button>
+        </div>
+      </div>
+
+      <!-- Two-Column Layout: Writing Area vs Participants List -->
+      <div class="grid lg:grid-cols-3 gap-6">
+
+        <!-- Column 1 & 2: Participant Action Area -->
+        <div class="lg:col-span-2 space-y-4">
+
+          <!-- State A: Writing Space (before submitting) -->
+          <div id="writing-space-box" class="bg-slate-800/90 border border-slate-700 rounded-2xl p-6 shadow-xl space-y-4">
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                  <i data-lucide="edit-3" class="w-5 h-5 text-indigo-400"></i> Free Writing Space
+                </h3>
+                <p class="text-xs text-slate-400">Write whatever you want. It will be scrambled and read by someone else anonymously.</p>
+              </div>
+              <span id="char-counter" class="text-xs text-slate-500 font-mono">0 chars</span>
+            </div>
+
+            <textarea id="vote-textarea" rows="6" placeholder="Type your vote, secret idea, funny statement, or prompt here..."
+              class="w-full p-4 rounded-xl bg-slate-900 border border-slate-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none text-slate-100 placeholder-slate-500 text-sm sm:text-base transition resize-none"></textarea>
+
+            <div class="flex items-center justify-between pt-2">
+              <span class="text-xs text-slate-500 italic">No one will know who wrote this.</span>
+              <button onclick="handleSubmitVote()" id="btn-submit-vote"
+                class="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-medium rounded-xl flex items-center gap-2 shadow-lg shadow-emerald-600/30 transition">
+                <i data-lucide="check" class="w-4 h-4"></i> Submit Vote
+              </button>
+            </div>
+          </div>
+
+          <!-- State B: Submitted / Waiting Indicator -->
+          <div id="submitted-waiting-box" class="hidden bg-slate-800/90 border border-emerald-500/30 rounded-2xl p-8 text-center shadow-xl space-y-4">
+            <div class="w-16 h-16 mx-auto rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center pulse-animation">
+              <i data-lucide="check-circle-2" class="w-8 h-8"></i>
+            </div>
+            <div class="space-y-1">
+              <h3 class="text-xl font-bold text-white">Your vote is locked in!</h3>
+              <p class="text-sm text-slate-400 max-w-md mx-auto">
+                Waiting for the other participants to finish and the host to scramble everyone's votes...
+              </p>
+            </div>
+            <div>
+              <button onclick="handleEditVote()" class="text-xs text-slate-400 hover:text-white underline underline-offset-4">
+                Want to change your writing? Click here to edit
+              </button>
+            </div>
+          </div>
+
+          <!-- State C: Scrambled Reveal View -->
+          <div id="scrambled-reveal-box" class="hidden space-y-4">
+            <div class="bg-gradient-to-b from-indigo-900/40 via-slate-800/90 to-slate-800/90 border border-indigo-500/40 rounded-2xl p-6 sm:p-8 shadow-2xl space-y-6">
+              
+              <div class="flex items-center justify-between border-b border-slate-700/60 pb-4">
+                <div class="flex items-center gap-2.5">
+                  <div class="p-2 rounded-lg bg-indigo-500/20 text-indigo-300">
+                    <i data-lucide="sparkles" class="w-5 h-5"></i>
+                  </div>
+                  <div>
+                    <h3 class="text-lg font-bold text-white">Your Scrambled Vote</h3>
+                    <p class="text-xs text-slate-400">Randomly selected for you. Not your own vote.</p>
+                  </div>
+                </div>
+                <span class="text-xs font-semibold px-2.5 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-300">
+                  Anonymous
+                </span>
+              </div>
+
+              <!-- List of assigned cards (typically 1, or 2 if someone left) -->
+              <div id="assigned-votes-list" class="space-y-4">
+                <!-- Dynamically populated -->
+              </div>
+
+              <!-- Host Restart Controls -->
+              <div id="host-new-round-bar" class="hidden pt-4 border-t border-slate-700/60 flex items-center justify-between">
+                <span class="text-xs text-slate-400">Want to run another round?</span>
+                <button onclick="handleNewRound()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-xs font-semibold rounded-xl text-white flex items-center gap-1.5 transition">
+                  <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i> Start New Round
+                </button>
+              </div>
+
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Column 3: Live Participants Roster -->
+        <div class="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-5 shadow-xl flex flex-col h-full min-h-[320px]">
+          <div class="flex items-center justify-between border-b border-slate-700/70 pb-3 mb-3">
+            <div class="flex items-center gap-2">
+              <i data-lucide="users-2" class="w-4 h-4 text-slate-400"></i>
+              <span class="text-sm font-bold text-white">Participants</span>
+            </div>
+            <span id="roster-count-badge" class="text-xs px-2 py-0.5 rounded-full bg-slate-700 text-slate-300 font-mono">0</span>
+          </div>
+
+          <!-- Participant List -->
+          <ul id="roster-list" class="space-y-2 flex-1 overflow-y-auto max-h-[420px] pr-1">
+            <!-- Dynamically populated -->
+          </ul>
+
+          <div class="mt-4 pt-3 border-t border-slate-700/60 text-[11px] text-slate-400 flex items-center justify-between">
+            <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-emerald-400"></span> Submitted</span>
+            <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span> Writing</span>
+          </div>
+        </div>
+
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- QR Code Modal -->
+  <div id="qr-modal" class="hidden fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-slate-800 border border-slate-700 rounded-3xl p-6 max-w-sm w-full text-center space-y-4 shadow-2xl relative">
+      <button onclick="toggleQRModal(false)" class="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+
+      <div class="space-y-1">
+        <h3 class="text-xl font-bold text-white">Scan to Join</h3>
+        <p class="text-xs text-slate-400">Point your phone camera at this QR code to join immediately.</p>
+      </div>
+
+      <div id="qrcode-container" class="bg-white p-4 rounded-2xl inline-block mx-auto shadow-inner">
+        <!-- Canvas generated here -->
+      </div>
+
+      <div class="pt-2">
+        <div class="text-xs uppercase tracking-wider text-slate-400 font-medium mb-1">Room Code</div>
+        <div id="qr-modal-code" class="font-mono text-2xl font-black text-indigo-400 tracking-wider"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Box -->
+  <div id="toast" class="fixed bottom-6 right-6 z-50 max-w-sm px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm shadow-2xl flex items-center gap-3 transform translate-y-20 opacity-0 transition-all duration-300 pointer-events-none">
+    <i id="toast-icon" data-lucide="info" class="w-5 h-5 text-indigo-400 shrink-0"></i>
+    <span id="toast-message">Notification</span>
+  </div>
+
+  <footer class="border-t border-slate-800/80 py-4 text-center text-xs text-slate-500">
+    VoteScramble &bull; Free, Real-Time & Anonymous
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>
