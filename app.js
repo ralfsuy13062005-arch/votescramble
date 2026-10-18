@@ -315,7 +315,17 @@ function renderRoster(participants) {
     statusCol.className = 'shrink-0 flex items-center gap-1.5';
 
     if (!p.connected) {
-      statusCol.innerHTML = `<span class="text-[11px] text-slate-500">Offline</span>`;
+      if (p.voted) {
+        statusCol.innerHTML = `
+          <span class="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-slate-800 text-emerald-400 border border-emerald-500/30 font-medium" title="Offline, but vote is safely submitted!">
+            <i data-lucide="check" class="w-3 h-3"></i> Offline (Saved)
+          </span>`;
+      } else {
+        statusCol.innerHTML = `
+          <span class="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700 font-medium" title="Offline and did not submit a vote">
+            <i data-lucide="wifi-off" class="w-3 h-3"></i> Offline (No Vote)
+          </span>`;
+      }
     } else if (p.voted) {
       statusCol.innerHTML = `
         <span class="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">
@@ -358,6 +368,15 @@ function handleSubmitVote() {
 function handleEditVote() {
   voteTextarea.value = state.submittedText;
   charCounter.textContent = `${voteTextarea.value.length} chars`;
+  state.hasVoted = false;
+
+  // Notify server so participant status switches from "Ready" back to "Writing"
+  if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+    state.socket.send(JSON.stringify({
+      type: 'edit_vote'
+    }));
+  }
+
   submittedWaitingBox.classList.add('hidden');
   writingSpaceBox.classList.remove('hidden');
   voteTextarea.focus();

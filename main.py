@@ -191,6 +191,13 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                 current_participant.voted = True
                 await broadcast_room_state(room)
 
+            elif action == "edit_vote":
+                if current_participant and room.status == "submitting":
+                    current_participant.voted = False
+                    # Temporarily remove submitted vote while user is editing
+                    room.votes = [v for v in room.votes if v["author_id"] != current_participant.id]
+                    await broadcast_room_state(room)
+
             elif action == "scramble":
                 if not current_participant or not current_participant.is_host:
                     await websocket.send_text(json.dumps({"type": "error", "message": "Only the host can scramble votes"}))
