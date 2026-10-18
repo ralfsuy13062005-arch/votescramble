@@ -5,10 +5,9 @@ import string
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from scramble import scramble_votes
@@ -239,25 +238,72 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
             await broadcast_room_state(room)
 
 
-# Serve static frontend files
-PUBLIC_DIR = Path(__file__).parent / "public"
-if not PUBLIC_DIR.exists():
-    PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
+# Serve static frontend files (supports both root directory and public/ folder)
+BASE_DIR = Path(__file__).parent
+PUBLIC_DIR = BASE_DIR / "public"
 
-app.mount("/static", StaticFiles(directory=str(PUBLIC_DIR)), name="static")
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    error_html = f"""<!DOCTYPE html>
+    <html lang="en">
+    <head><meta charset="utf-8"><title>VoteScramble - Error</title></head>
+    <body style="font-family:system-ui,sans-serif;padding:2.5rem;background:#0f172a;color:#f8fafc;max-width:600px;margin:auto;">
+      <h2 style="color:#f43f5e;">Application Error</h2>
+      <p style="background:#1e293b;padding:1rem;border-radius:0.75rem;border:1px solid #334155;font-family:monospace;font-size:0.9rem;">{str(exc)}</p>
+      <a href="/" style="color:#6366f1;text-decoration:none;font-weight:600;">&larr; Return to Home</a>
+    </body>
+    </html>"""
+    return HTMLResponse(content=error_html, status_code=500, headers={"Content-Disposition": "inline"})
+
+def get_static_response(filename: str) -> Optional[Response]:
+    clean_name = filename.lstrip("/\\")
+    candidates = [
+        BASE_DIR / clean_name,
+        PUBLIC_DIR / clean_name
+    ]
+    for path in candidates:
+        if path.is_file():
+            content = path.read_bytes()
+            media_type = "text/plain"
+            if clean_name.endswith(".html") or clean_name == "":
+                media_type = "text/html; charset=utf-8"
+            elif clean_name.endswith(".js"):
+                media_type = "application/javascript; charset=utf-8"
+            elif clean_name.endswith(".css"):
+                media_type = "text/css; charset=utf-8"
+            return Response(
+                content=content,
+                media_type=media_type,
+                headers={"Content-Disposition": "inline", "X-Content-Type-Options": "nosniff"}
+            )
+    return None
 
 @app.get("/")
 async def index():
-    return FileResponse(PUBLIC_DIR / "index.html")
+    res = get_static_response("index.html")
+    if res:
+        return res
+    files = [f.name for f in BASE_DIR.iterdir()]
+    return HTMLResponse(
+        content=f"<h2>VoteScramble: index.html not found!</h2><p>Files in current directory: {files}</p>",
+        status_code=404,
+        headers={"Content-Disposition": "inline"}
+    )
 
 @app.get("/{catchall:path}")
 async def serve_spa(catchall: str):
-    # If file exists in public dir (e.g. app.js, style.css), return it
-    potential_file = PUBLIC_DIR / catchall
-    if potential_file.is_file():
-        return FileResponse(potential_file)
-    # Otherwise fallback to index.html for SPA routing (e.g. /?room=XYZ or /room/XYZ)
-    return FileResponse(PUBLIC_DIR / "index.html")
+    res = get_static_response(catchall)
+    if res:
+        return res
+    # Fallback to index.html for SPA routes
+    idx_res = get_static_response("index.html")
+    if idx_res:
+        return idx_res
+    return HTMLResponse(
+        content="<h2>Page not found</h2>",
+        status_code=404,
+        headers={"Content-Disposition": "inline"}
+    )
 
 
 if __name__ == "__main__":
