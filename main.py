@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from scramble import scramble_votes
+from scramble import scramble_votes, reassign_surplus_vote
 
 app = FastAPI(title="Real-Time Voting & Vote Scrambler")
 
@@ -55,12 +55,28 @@ class Room:
         return [{"id": p.id, "name": p.name} for p in self.participants.values() if p.connected]
 
     def get_public_state(self):
+        active_list = self.get_active_participants()
+        missing_votes = []
+        surplus_count = 0
+        if self.status == "scrambled":
+            missing_votes = [
+                {"id": p["id"], "name": p["name"]}
+                for p in active_list
+                if len(self.assignments.get(p["id"], [])) == 0
+            ]
+            surplus_count = sum(
+                max(0, len(votes) - 1)
+                for votes in self.assignments.values()
+            )
+
         return {
             "roomId": self.room_id,
             "status": self.status,
             "participants": [p.to_dict() for p in self.participants.values()],
             "votesCount": len(self.votes),
-            "activeCount": len(self.get_active_participants()),
+            "activeCount": len(active_list),
+            "missingVotes": missing_votes,
+            "surplusCount": surplus_count,
         }
 
 ROOMS: Dict[str, Room] = {}
@@ -198,7 +214,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                     room.votes = [v for v in room.votes if v["author_id"] != current_participant.id]
                     await broadcast_room_state(room)
 
-            elif action == "scramble":
+            elif action in ("scramble", "rescramble_all"):
                 if not current_participant or not current_participant.is_host:
                     await websocket.send_text(json.dumps({"type": "error", "message": "Only the host can scramble votes"}))
                     continue
@@ -212,10 +228,41 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                     await websocket.send_text(json.dumps({"type": "error", "message": "No active participants connected"}))
                     continue
 
-                # Run scramble algorithm
+                # Run scramble algorithm across all active players
                 room.assignments = scramble_votes(active_players, room.votes)
                 room.status = "scrambled"
                 await broadcast_room_state(room)
+
+            elif action == "reassign_surplus":
+                if not current_participant or not current_participant.is_host:
+                    await websocket.send_text(json.dumps({"type": "error", "message": "Only the host can reassign surplus votes"}))
+                    continue
+
+                if room.status != "scrambled":
+                    await websocket.send_text(json.dumps({"type": "error", "message": "Room is not in scrambled phase"}))
+                    continue
+
+                target_pid = msg.get("targetParticipantId")
+                active_players = room.get_active_participants()
+                if not target_pid:
+                    # Pick first active player who currently has 0 votes
+                    for p in active_players:
+                        if len(room.assignments.get(p["id"], [])) == 0:
+                            target_pid = p["id"]
+                            break
+
+                if not target_pid:
+                    await websocket.send_text(json.dumps({"type": "error", "message": "No participant needs a vote assigned"}))
+                    continue
+
+                success = reassign_surplus_vote(room.assignments, target_pid)
+                if success:
+                    await broadcast_room_state(room)
+                else:
+                    await websocket.send_text(json.dumps({
+                        "type": "error",
+                        "message": "No available surplus vote found to transfer. Please use 'Rescramble All'."
+                    }))
 
             elif action == "new_round":
                 if not current_participant or not current_participant.is_host:

@@ -112,3 +112,52 @@ def scramble_votes(participants: List[Dict[str, Any]], votes: List[Dict[str, Any
             result_assignment[chosen_pid].append(vote)
 
     return result_assignment
+
+
+def reassign_surplus_vote(assignments: Dict[str, List[Dict[str, Any]]], target_pid: str) -> bool:
+    """
+    Finds a participant who holds >= 2 votes and transfers 1 vote to target_pid
+    such that vote['author_id'] != target_pid.
+    Preserves all other participants' assignments.
+    
+    Returns:
+        True if a vote was successfully transferred, False otherwise.
+    """
+    if target_pid not in assignments:
+        assignments[target_pid] = []
+
+    # Donors are participants with 2 or more votes
+    donors = [pid for pid, assigned_list in assignments.items() if len(assigned_list) >= 2 and pid != target_pid]
+    if not donors:
+        return False
+
+    random.shuffle(donors)
+
+    # 1. Direct transfer attempt: find a donor holding a vote not authored by target_pid
+    for donor_pid in donors:
+        donor_votes = assignments[donor_pid]
+        for idx, vote in enumerate(donor_votes):
+            if vote.get("author_id") != target_pid:
+                transferred = donor_votes.pop(idx)
+                assignments[target_pid].append(transferred)
+                return True
+
+    # 2. Swap transfer attempt (if every surplus vote held by donors happens to be authored by target_pid):
+    # Donor gives their vote V1 (authored by target) to intermediary P (who holds V2 not authored by target).
+    # Intermediary gives V2 to target.
+    for donor_pid in donors:
+        donor_votes = assignments[donor_pid]
+        for other_pid, other_votes in assignments.items():
+            if other_pid in (donor_pid, target_pid) or not other_votes:
+                continue
+            for idx_d, v_d in enumerate(donor_votes):
+                for idx_o, v_o in enumerate(other_votes):
+                    if (v_o.get("author_id") != target_pid and 
+                        v_d.get("author_id") != other_pid):
+                        donor_votes.pop(idx_d)
+                        other_votes.pop(idx_o)
+                        other_votes.append(v_d)
+                        assignments[target_pid].append(v_o)
+                        return True
+
+    return False

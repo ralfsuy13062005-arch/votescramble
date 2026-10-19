@@ -39,6 +39,9 @@ const qrcodeContainer = document.getElementById('qrcode-container');
 const qrModalCode = document.getElementById('qr-modal-code');
 const toastEl = document.getElementById('toast');
 const toastMsg = document.getElementById('toast-message');
+const hostReconnectAlert = document.getElementById('host-reconnect-alert');
+const reconnectPlayerText = document.getElementById('reconnect-player-text');
+const btnReassignSurplus = document.getElementById('btn-reassign-surplus');
 
 // Initialize on Load
 window.addEventListener('DOMContentLoaded', () => {
@@ -56,10 +59,10 @@ window.addEventListener('DOMContentLoaded', () => {
     joinRoomCodeInput.value = roomParam.toUpperCase();
     joinNameInput.focus();
     
-    // Check if user was already in this room
-    const savedPid = localStorage.getItem(`votescramble_pid_${roomParam.toUpperCase()}`);
-    const savedName = localStorage.getItem(`votescramble_name_${roomParam.toUpperCase()}`);
-    const savedHostToken = localStorage.getItem(`votescramble_host_${roomParam.toUpperCase()}`);
+    // Check if this specific tab was already in this room (using tab-isolated sessionStorage)
+    const savedPid = sessionStorage.getItem(`votescramble_pid_${roomParam.toUpperCase()}`);
+    const savedName = sessionStorage.getItem(`votescramble_name_${roomParam.toUpperCase()}`);
+    const savedHostToken = sessionStorage.getItem(`votescramble_host_${roomParam.toUpperCase()}`);
     if (savedPid && savedName) {
       state.roomId = roomParam.toUpperCase();
       state.participantId = savedPid;
@@ -116,10 +119,10 @@ async function handleCreateRoom() {
     state.name = hostName;
     state.participantId = 'p_' + Math.random().toString(36).substring(2, 10);
 
-    // Persist in localStorage
-    localStorage.setItem(`votescramble_pid_${state.roomId}`, state.participantId);
-    localStorage.setItem(`votescramble_name_${state.roomId}`, state.name);
-    localStorage.setItem(`votescramble_host_${state.roomId}`, state.hostToken);
+    // Persist in tab-isolated sessionStorage so opening multiple tabs creates independent players
+    sessionStorage.setItem(`votescramble_pid_${state.roomId}`, state.participantId);
+    sessionStorage.setItem(`votescramble_name_${state.roomId}`, state.name);
+    sessionStorage.setItem(`votescramble_host_${state.roomId}`, state.hostToken);
 
     // Update URL without page reload
     window.history.pushState({}, '', `/?room=${state.roomId}`);
@@ -145,12 +148,12 @@ function handleJoinRoom() {
 
   state.roomId = code;
   state.name = name;
-  state.hostToken = localStorage.getItem(`votescramble_host_${code}`) || null;
+  state.hostToken = sessionStorage.getItem(`votescramble_host_${code}`) || null;
   state.isHost = !!state.hostToken;
-  state.participantId = localStorage.getItem(`votescramble_pid_${code}`) || ('p_' + Math.random().toString(36).substring(2, 10));
+  state.participantId = sessionStorage.getItem(`votescramble_pid_${code}`) || ('p_' + Math.random().toString(36).substring(2, 10));
 
-  localStorage.setItem(`votescramble_pid_${code}`, state.participantId);
-  localStorage.setItem(`votescramble_name_${code}`, state.name);
+  sessionStorage.setItem(`votescramble_pid_${code}`, state.participantId);
+  sessionStorage.setItem(`votescramble_name_${code}`, state.name);
 
   window.history.pushState({}, '', `/?room=${state.roomId}`);
   connectWebSocket();
@@ -250,6 +253,25 @@ function updateRoomState(data) {
 
   // Update Participants Roster
   renderRoster(data.participants);
+
+  // Handle host reconnect alert for participants with 0 votes during scrambled phase
+  if (state.isHost && state.roomStatus === 'scrambled' && hostReconnectAlert) {
+    if (data.missingVotes && data.missingVotes.length > 0) {
+      hostReconnectAlert.classList.remove('hidden');
+      const names = data.missingVotes.map(m => m.name).join(', ');
+      reconnectPlayerText.textContent = `${names} reconnected after scramble`;
+
+      const hasSurplus = (data.surplusCount > 0);
+      btnReassignSurplus.disabled = !hasSurplus;
+      btnReassignSurplus.title = hasSurplus 
+        ? "Give 1 surplus vote from a player who has 2" 
+        : "No one currently has a surplus vote to donate";
+    } else {
+      hostReconnectAlert.classList.add('hidden');
+    }
+  } else if (hostReconnectAlert) {
+    hostReconnectAlert.classList.add('hidden');
+  }
 
   // Manage UI view states:
   if (state.roomStatus === 'scrambled') {
@@ -385,10 +407,34 @@ function handleEditVote() {
 // Scramble Trigger (Host Only)
 function handleScramble() {
   if (!state.isHost) return;
+  hasCelebrated = false;
   state.socket.send(JSON.stringify({
     type: 'scramble',
     hostToken: state.hostToken
   }));
+}
+
+// Rescramble All (Host Only)
+function handleRescrambleAll() {
+  if (!state.isHost) return;
+  if (!confirm('Rescramble all votes? Everyone currently connected will receive a new random vote.')) return;
+
+  hasCelebrated = false;
+  state.socket.send(JSON.stringify({
+    type: 'rescramble_all',
+    hostToken: state.hostToken
+  }));
+  showToast('Rescrambling all votes...');
+}
+
+// Reassign Surplus Vote (Host Only)
+function handleReassignSurplus() {
+  if (!state.isHost) return;
+  state.socket.send(JSON.stringify({
+    type: 'reassign_surplus',
+    hostToken: state.hostToken
+  }));
+  showToast('Reassigning surplus vote...');
 }
 
 // Render Assigned Scrambled Votes
@@ -398,10 +444,17 @@ function renderAssignedVotes() {
 
   if (!state.myVotes || state.myVotes.length === 0) {
     assignedVotesList.innerHTML = `
-      <div class="text-center py-8 text-slate-400 text-sm">
-        No vote assigned to you. (You may have joined after the scramble).
+      <div class="p-6 rounded-2xl border border-amber-500/30 bg-amber-500/5 text-center space-y-3">
+        <div class="w-10 h-10 mx-auto rounded-full bg-amber-500/10 text-amber-400 flex items-center justify-center">
+          <i data-lucide="clock" class="w-5 h-5"></i>
+        </div>
+        <h4 class="text-base font-bold text-white">Reconnected after Scramble</h4>
+        <p class="text-xs text-slate-300 max-w-sm mx-auto">
+          You came back online after the votes were already scrambled. Please wait for the host to assign you a vote or rescramble!
+        </p>
       </div>
     `;
+    lucide.createIcons();
     return;
   }
 
