@@ -157,20 +157,43 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                 host_token = msg.get("hostToken")
                 is_host = (host_token is not None and host_token == room.host_token)
 
-                if pid in room.participants:
-                    # Reconnect
-                    current_participant = room.participants[pid]
+                # Check if participant already exists by exact pid or matching offline nickname
+                existing_by_pid = room.participants.get(pid)
+                existing_by_name = next(
+                    (p for p in room.participants.values() if p.name.strip().lower() == name.lower()),
+                    None
+                )
+
+                if existing_by_pid:
+                    current_participant = existing_by_pid
                     if name:
                         current_participant.name = name
                     current_participant.connected = True
                     current_participant.socket = websocket
                     if is_host:
                         current_participant.is_host = True
+                elif existing_by_name:
+                    if existing_by_name.connected:
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "message": f"The name '{name}' is already currently in use by an active player."
+                        }))
+                        continue
+                    else:
+                        # Reclaim the offline account!
+                        current_participant = existing_by_name
+                        current_participant.connected = True
+                        current_participant.socket = websocket
+                        if is_host:
+                            current_participant.is_host = True
                 else:
                     # New participant
                     current_participant = Participant(pid, name, is_host=is_host)
                     current_participant.socket = websocket
                     room.participants[pid] = current_participant
+
+                # Look up any existing submitted vote for this participant
+                saved_vote = next((v for v in room.votes if v["author_id"] == current_participant.id), None)
 
                 # Confirm join to user
                 await websocket.send_text(json.dumps({
@@ -179,6 +202,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                     "name": current_participant.name,
                     "isHost": current_participant.is_host,
                     "roomId": room.room_id,
+                    "submittedText": saved_vote["text"] if saved_vote else "",
                 }))
 
                 await broadcast_room_state(room)
@@ -263,6 +287,43 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                         "type": "error",
                         "message": "No available surplus vote found to transfer. Please use 'Rescramble All'."
                     }))
+
+            elif action == "kick_participant":
+                if not current_participant or not current_participant.is_host:
+                    await websocket.send_text(json.dumps({"type": "error", "message": "Only the host can kick participants"}))
+                    continue
+
+                target_pid = msg.get("targetParticipantId")
+                if not target_pid or target_pid == current_participant.id:
+                    await websocket.send_text(json.dumps({"type": "error", "message": "Cannot kick yourself"}))
+                    continue
+
+                if target_pid in room.participants:
+                    kicked_p = room.participants[target_pid]
+                    # If connected, notify them and close their socket
+                    if kicked_p.socket:
+                        try:
+                            await kicked_p.socket.send_text(json.dumps({
+                                "type": "kicked",
+                                "message": f"You were removed from the room by the host."
+                            }))
+                            await kicked_p.socket.close()
+                        except Exception:
+                            pass
+
+                    # Remove from room participants
+                    del room.participants[target_pid]
+
+                    # Remove their vote from room.votes
+                    room.votes = [v for v in room.votes if v["author_id"] != target_pid]
+
+                    # If scrambled, remove assignments for target_pid and remove any votes they authored
+                    if target_pid in room.assignments:
+                        del room.assignments[target_pid]
+                    for pid_key, assigned_list in room.assignments.items():
+                        room.assignments[pid_key] = [v for v in assigned_list if v["author_id"] != target_pid]
+
+                    await broadcast_room_state(room)
 
             elif action == "new_round":
                 if not current_participant or not current_participant.is_host:

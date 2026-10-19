@@ -209,8 +209,26 @@ function handleSocketMessage(msg) {
     return;
   }
 
+  if (msg.type === 'kicked') {
+    showToast(msg.message || 'You were removed from the room by the host.', true);
+    navigateHome();
+    return;
+  }
+
   if (msg.type === 'joined') {
     state.isHost = msg.isHost;
+    state.participantId = msg.participantId;
+    state.name = msg.name;
+    sessionStorage.setItem(`votescramble_pid_${state.roomId}`, msg.participantId);
+    sessionStorage.setItem(`votescramble_name_${state.roomId}`, msg.name);
+
+    // If reclaiming an account with a previously saved vote, restore it
+    if (msg.submittedText) {
+      state.submittedText = msg.submittedText;
+      voteTextarea.value = msg.submittedText;
+      charCounter.textContent = `${msg.submittedText.length} chars`;
+    }
+
     switchToRoomView();
     return;
   }
@@ -360,12 +378,37 @@ function renderRoster(participants) {
         </span>`;
     }
 
+    // Host can kick non-host participants
+    if (state.isHost && !p.isHost) {
+      const kickBtn = document.createElement('button');
+      kickBtn.className = 'p-1 hover:bg-red-500/20 text-slate-500 hover:text-red-400 rounded-lg transition shrink-0 ml-1.5';
+      kickBtn.title = `Kick ${p.name}`;
+      kickBtn.innerHTML = '<i data-lucide="trash-2" class="w-3.5 h-3.5"></i>';
+      kickBtn.onclick = (e) => {
+        e.stopPropagation();
+        handleKickParticipant(p.id, p.name);
+      };
+      statusCol.appendChild(kickBtn);
+    }
+
     li.appendChild(nameCol);
     li.appendChild(statusCol);
     rosterList.appendChild(li);
   });
 
   lucide.createIcons();
+}
+
+// Kick Participant (Host Only)
+function handleKickParticipant(pid, name) {
+  if (!state.isHost) return;
+  if (!confirm(`Are you sure you want to kick "${name}" and remove their vote?`)) return;
+
+  state.socket.send(JSON.stringify({
+    type: 'kick_participant',
+    targetParticipantId: pid,
+    hostToken: state.hostToken
+  }));
 }
 
 // Submit Vote
